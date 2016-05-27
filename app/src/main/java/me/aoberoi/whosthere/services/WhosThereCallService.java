@@ -1,4 +1,4 @@
-package me.aoberoi.whosthere;
+package me.aoberoi.whosthere.services;
 
 import android.app.NotificationManager;
 import android.app.PendingIntent;
@@ -11,6 +11,9 @@ import android.util.Log;
 
 import com.google.firebase.messaging.FirebaseMessagingService;
 import com.google.firebase.messaging.RemoteMessage;
+
+import me.aoberoi.whosthere.R;
+import me.aoberoi.whosthere.activities.CallActivity;
 
 public class WhosThereCallService extends FirebaseMessagingService {
     private static final String TAG = "WhosThereCallService";

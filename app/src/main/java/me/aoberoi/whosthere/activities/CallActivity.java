@@ -1,7 +1,9 @@
-package me.aoberoi.whosthere;
+package me.aoberoi.whosthere.activities;
 
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
+
+import me.aoberoi.whosthere.R;
 
 public class CallActivity extends AppCompatActivity {
 
