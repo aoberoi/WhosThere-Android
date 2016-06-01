@@ -1,19 +1,15 @@
 package me.aoberoi.whosthere.services;
 
-import android.app.NotificationManager;
-import android.app.PendingIntent;
 import android.content.Intent;
-import android.content.Context;
-import android.media.RingtoneManager;
-import android.net.Uri;
-import android.support.v4.app.NotificationCompat;
 import android.util.Log;
 
 import com.google.firebase.messaging.FirebaseMessagingService;
 import com.google.firebase.messaging.RemoteMessage;
 
-import me.aoberoi.whosthere.R;
+import java.util.Map;
+
 import me.aoberoi.whosthere.activities.CallActivity;
+import me.aoberoi.whosthere.constants.CallConstants;
 
 public class WhosThereCallService extends FirebaseMessagingService {
     private static final String TAG = "WhosThereCallService";
@@ -25,41 +21,56 @@ public class WhosThereCallService extends FirebaseMessagingService {
      */
     @Override
     public void onMessageReceived(RemoteMessage remoteMessage) {
-        // TODO(developer): Handle FCM messages here.
-        // If the application is in the foreground handle both data and notification messages here.
-        // Also if you intend on generating your own notifications as a result of a received FCM
-        // message, here is where that should be initiated. See sendNotification method below.
         super.onMessageReceived(remoteMessage);
-        Log.d(TAG, "From: " + remoteMessage.getFrom());
-        Log.d(TAG, "Notification Message Body: " + remoteMessage.getNotification().getBody());
+        Map<String, String> messageData = remoteMessage.getData();
+        Log.d(TAG, "Message Data: " + messageData);
 
-        //sendNotification(remoteMessage.getNotification().getBody());
+        String callId = messageData.keySet().iterator().next();
+        startCall(callId);
+//        try {
+//            JSONObject callDetails = new JSONObject(messageData.get(callId));
+//            if (callDetails.getJSONObject("to").isNull("opentokToken")) {
+//                // TODO: handle being the sender
+//            } else {
+//                //sendNotification(callId, messageData.get(callId));
+//                startIncomingCall(callId, messageData.get(callId));
+//            }
+//        } catch (JSONException e) {
+//            Log.e(TAG, "Could not parse call JSON: " + e.getMessage());
+//        }
+
     }
 
-    /**
-     * Create and show a simple notification containing the received FCM message.
-     *
-     * @param messageBody FCM message body received.
-     */
-    private void sendNotification(String messageBody) {
+//    private void sendNotification(String callId, String callDetails) {
+//        Intent intent = new Intent(this, CallActivity.class);
+//        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+//        intent.putExtra(CallConstants.EXTRA_CALL_ID, callId);
+//        intent.putExtra(CallConstants.EXTRA_CALL_DETAILS, callDetails);
+//        PendingIntent pendingIntent = PendingIntent.getActivity(this, 0 /* Request code */, intent,
+//                PendingIntent.FLAG_ONE_SHOT);
+//
+//        Uri defaultSoundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
+//        NotificationCompat.Builder notificationBuilder = new NotificationCompat.Builder(this)
+//                .setSmallIcon(R.drawable.ic_stat_ic_notification)
+//                .setContentTitle("Incoming Video Call")
+//                .setAutoCancel(true)
+//                .setSound(defaultSoundUri)
+//                .setPriority(NotificationCompat.PRIORITY_MAX)
+//                .setCategory(NotificationCompat.CATEGORY_CALL)
+//                .setContentIntent(pendingIntent);
+//
+//        NotificationManager notificationManager =
+//                (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+//
+//        notificationManager.notify(0 /* ID of notification */, notificationBuilder.build());
+//    }
+
+    private void startCall(String callId) {
         Intent intent = new Intent(this, CallActivity.class);
-        intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
-        PendingIntent pendingIntent = PendingIntent.getActivity(this, 0 /* Request code */, intent,
-                PendingIntent.FLAG_ONE_SHOT);
-
-        Uri defaultSoundUri= RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
-        NotificationCompat.Builder notificationBuilder = new NotificationCompat.Builder(this)
-                .setSmallIcon(R.drawable.ic_stat_ic_notification)
-                .setContentTitle("Incoming Video Call")
-                .setContentText(messageBody)
-                .setAutoCancel(true)
-                .setSound(defaultSoundUri)
-                .setPriority(NotificationCompat.PRIORITY_MAX)
-                .setContentIntent(pendingIntent);
-
-        NotificationManager notificationManager =
-                (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
-
-        notificationManager.notify(0 /* ID of notification */, notificationBuilder.build());
+        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        intent.putExtra(CallConstants.EXTRA_CALL_ID, callId);
+//        intent.putExtra(CallConstants.EXTRA_CALL_DETAILS, callDetails);
+//        intent.putExtra(CallConstants.EXTRA_IS_INCOMING, true);
+        this.startActivity(intent);
     }
 }

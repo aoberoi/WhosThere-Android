@@ -109,7 +109,7 @@ public class MainActivity extends AppCompatActivity {
                 recipientContactIdField.setEnabled(false);
 
                 HashMap<String, Object> callRequest = new HashMap<String, Object>();
-                callRequest.put("to", recipientContactIdField.getText().toString());
+                callRequest.put("to", recipientContactIdField.getText().toString().trim());
                 callRequest.put("from", mUser.getUid());
                 callRequest.put("timestamp", ServerValue.TIMESTAMP);
                 mCallRequestsRef.push().setValue(callRequest, new DatabaseReference.CompletionListener() {
@@ -119,12 +119,16 @@ public class MainActivity extends AppCompatActivity {
                             Log.e(TAG, "clickListener:setValue:onCompleteError " + databaseError.getMessage() + " " + databaseError.getDetails());
                             callButton.setEnabled(true);
                             recipientContactIdField.setEnabled(true);
+                            recipientContactIdField.selectAll();
+                            // TODO: inspect actual error to display a more appropriate message
+                            // TODO: localize
+                            Toast.makeText(MainActivity.this, "Invalid Contact ID, try again.", Toast.LENGTH_SHORT).show();
                         } else {
                             Log.d(TAG, "clickListener:setValue:onComplete");
-                            // TODO: start the call activity
                         }
                     }
                 });
+                // TODO: show an "in progress" UI
             }
         });
     }
