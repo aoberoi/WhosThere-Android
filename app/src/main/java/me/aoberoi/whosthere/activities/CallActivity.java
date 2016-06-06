@@ -1,6 +1,9 @@
 package me.aoberoi.whosthere.activities;
 
 import android.content.Intent;
+import android.media.Ringtone;
+import android.media.RingtoneManager;
+import android.net.Uri;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.util.Log;
@@ -36,6 +39,7 @@ import me.aoberoi.whosthere.constants.CallConstants;
 // TODO: get a loud ringtone that repeats and vibrations
 // TODO: make incoming call's subscriber video-only
 // TODO: backgrounding support
+// TODO: "back" button ends the call
 public class CallActivity extends AppCompatActivity implements Session.SessionListener {
 
     private static final String TAG = "CallActivity";
@@ -52,6 +56,7 @@ public class CallActivity extends AppCompatActivity implements Session.SessionLi
     private String mRecipientUserId;
     private Long mInitiatedAt;
     private Long mEndedAt;
+    private Ringtone mRingtone;
 
     private DatabaseReference mCallEndedAtRef;
 
@@ -143,6 +148,14 @@ public class CallActivity extends AppCompatActivity implements Session.SessionLi
     }
 
     @Override
+    protected void onStart() {
+        super.onStart();
+        Uri notification = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE);
+        mRingtone = RingtoneManager.getRingtone(getApplicationContext(), notification);
+        mRingtone.play();
+    }
+
+    @Override
     protected void onStop() {
         super.onStop();
     }
@@ -160,10 +173,12 @@ public class CallActivity extends AppCompatActivity implements Session.SessionLi
     }
 
     public void endCall(View endCallButton) {
+        mRingtone.stop();
         tearDownCall();
     }
 
     public void acceptCall(View acceptCallButton) {
+        mRingtone.stop();
         startPublishing();
         setUserInterfaceState(UserInterfaceState.CALL_IN_PROGRESS);
     }
@@ -212,6 +227,9 @@ public class CallActivity extends AppCompatActivity implements Session.SessionLi
             case CALL_IN_PROGRESS:
                 populateSubscriberUserInterface();
                 populatePublisherUserInterface();
+
+                // This was false for the recipient, but should now be true
+                mSubscriber.setSubscribeToAudio(true);
 
                 mStatusTextView.setVisibility(View.GONE);
                 mIncomingActionsBar.setVisibility(View.GONE);
@@ -273,6 +291,7 @@ public class CallActivity extends AppCompatActivity implements Session.SessionLi
             } else {
                 // stream is from incoming invitation
                 setUserInterfaceState(UserInterfaceState.INVITATION_INCOMING);
+                mSubscriber.setSubscribeToAudio(false);
             }
         } else {
             // TODO: why would this happen?
