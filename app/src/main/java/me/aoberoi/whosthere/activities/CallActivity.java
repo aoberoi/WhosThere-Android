@@ -36,8 +36,6 @@ import org.json.JSONObject;
 import me.aoberoi.whosthere.R;
 import me.aoberoi.whosthere.constants.CallConstants;
 
-// TODO: get a loud ringtone that repeats and vibrations
-// TODO: make incoming call's subscriber video-only
 // TODO: backgrounding support
 // TODO: "back" button ends the call
 public class CallActivity extends AppCompatActivity implements Session.SessionListener {
@@ -148,6 +146,9 @@ public class CallActivity extends AppCompatActivity implements Session.SessionLi
     }
 
     @Override
+    // TODO: ringtone sound only for recipient and a "ring back" sound on the sender
+    // TODO: use MediaPlayer and AudioAttributes
+    // TODO: query system for mute/ringer/vibrate settings and mimic them.
     protected void onStart() {
         super.onStart();
         Uri notification = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE);
