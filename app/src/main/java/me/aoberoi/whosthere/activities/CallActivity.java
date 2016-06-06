@@ -4,6 +4,7 @@ import android.content.Intent;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.util.Log;
+import android.view.SurfaceView;
 import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
@@ -26,13 +27,15 @@ import com.opentok.android.Session;
 import com.opentok.android.Stream;
 import com.opentok.android.Subscriber;
 
-import java.util.Map;
+import org.json.JSONException;
+import org.json.JSONObject;
 
 import me.aoberoi.whosthere.R;
 import me.aoberoi.whosthere.constants.CallConstants;
 
 // TODO: get a loud ringtone that repeats and vibrations
 // TODO: make incoming call's subscriber video-only
+// TODO: backgrounding support
 public class CallActivity extends AppCompatActivity implements Session.SessionListener {
 
     private static final String TAG = "CallActivity";
@@ -50,7 +53,7 @@ public class CallActivity extends AppCompatActivity implements Session.SessionLi
     private Long mInitiatedAt;
     private Long mEndedAt;
 
-    private DatabaseReference mCallRef;
+    private DatabaseReference mCallEndedAtRef;
 
     private Session mCallSession;
     private Publisher mPublisher;
@@ -77,7 +80,8 @@ public class CallActivity extends AppCompatActivity implements Session.SessionLi
         public void onDataChange(DataSnapshot dataSnapshot) {
             Log.d(TAG, "end call data change: " + dataSnapshot.getValue());
             // TODO: handle call end
-            if (dataSnapshot.getValue() != null) {
+            mEndedAt = (Long) dataSnapshot.getValue();
+            if (mEndedAt != null) {
                 Log.d(TAG, "tearing down the call");
                 // TODO: check if connected
                 if (mCallSession != null) {
@@ -112,44 +116,30 @@ public class CallActivity extends AppCompatActivity implements Session.SessionLi
 
         Intent intent = getIntent();
         mCallId = intent.getStringExtra(CallConstants.EXTRA_CALL_ID);
+        String callDetails = intent.getStringExtra(CallConstants.EXTRA_CALL_DETAILS);
         Log.d(TAG, "call id: " + mCallId);
 
-        mCallRef = FirebaseDatabase.getInstance().getReference("calls/" + mCallId);
-        // TODO: consider seeding this with data from FCM message. this can save time
-        mCallRef.addListenerForSingleValueEvent(new ValueEventListener() {
-            @Override
-            public void onDataChange(DataSnapshot dataSnapshot) {
-                // TODO: this is some super fragile parsing
-                Map<String, Object> callDetails = (Map<String, Object>) dataSnapshot.getValue();
-                mCallKey = (String) callDetails.get("opentokKey");
-                mCallSessionId = (String) callDetails.get("opentokSession");
-                Map<String, Object> callTo = (Map<String, Object>) callDetails.get("to");
-                Map<String, Object> callFrom = (Map<String, Object>) callDetails.get("from");
-                if (callTo.get("opentokToken") == null) {
-                    mIsSender = true;
-                    mCallToken = (String) callFrom.get("opentokToken");
-                } else {
-                    mIsSender = false;
-                    mCallToken = (String) callTo.get("opentokToken");
-                }
-                mSenderUserId = (String) callFrom.get("user");
-                mRecipientUserId = (String) callTo.get("user");
-                mInitiatedAt = (Long) callDetails.get("initiatedAt");
+        mCallEndedAtRef = FirebaseDatabase.getInstance().getReference("calls/" + mCallId + "/endedAt");
+        mCallEndedAtRef.addValueEventListener(mEndCallListener);
 
+        try {
+            JSONObject callDetailsJSON = new JSONObject(callDetails);
 
-                setupCall();
-                // this behaves as an "update" for the UI once the call data has loaded
-                setUserInterfaceState(mUserInterfaceState);
-            }
+            mCallKey = callDetailsJSON.getString("opentokKey");
+            mCallSessionId = callDetailsJSON.getString("opentokSession");
+            mCallToken = callDetailsJSON.getString("opentokToken");
+            mSenderUserId = callDetailsJSON.getString("from");
+            mRecipientUserId = callDetailsJSON.getString("to");
+            mInitiatedAt = callDetailsJSON.getLong("initiatedAt");
+            mIsSender = mSenderUserId.equals(callDetailsJSON.getString("id"));
 
-            @Override
-            public void onCancelled(DatabaseError databaseError) {
-                // TODO: display an error
-            }
-        });
-        mCallRef.child("endedAt").addValueEventListener(mEndCallListener);
+            setupCall();
+            setUserInterfaceState(UserInterfaceState.INITIALIZING);
+        } catch (JSONException exception) {
+            // TODO: display an error
+            Log.e(TAG, "Error parsing call details: " + exception.getMessage());
+        }
 
-        setUserInterfaceState(UserInterfaceState.INITIALIZING);
     }
 
     @Override
@@ -166,8 +156,7 @@ public class CallActivity extends AppCompatActivity implements Session.SessionLi
     private void tearDownCall() {
         // this will asynchronously trigger mEndCallListener, which will complete
         // the tear down
-        // TODO: store in ivar?
-        mCallRef.child("endedAt").setValue(ServerValue.TIMESTAMP);
+        mCallEndedAtRef.setValue(ServerValue.TIMESTAMP);
     }
 
     public void endCall(View endCallButton) {
@@ -189,15 +178,17 @@ public class CallActivity extends AppCompatActivity implements Session.SessionLi
     }
 
     private void populatePublisherUserInterface() {
-        mPublisherContainer.setVisibility(View.VISIBLE);
         if (mPublisherContainer.getChildCount() == 0) {
             mPublisher.getRenderer().setStyle(BaseVideoRenderer.STYLE_VIDEO_SCALE, BaseVideoRenderer.STYLE_VIDEO_FILL);
-            mPublisherContainer.addView(mPublisher.getView());
+            SurfaceView publisherView = (SurfaceView) mPublisher.getView();
+            mPublisherContainer.addView(publisherView);
+            publisherView.setZOrderOnTop(true);
         }
+        mPublisherContainer.setVisibility(View.VISIBLE);
     }
 
     private void populateSubscriberUserInterface() {
-        if (mSubscriberContainer.getChildCount() == 0) {
+        if (mSubscriber != null && mSubscriberContainer.getChildCount() == 0) {
             mSubscriber.getRenderer().setStyle(BaseVideoRenderer.STYLE_VIDEO_SCALE, BaseVideoRenderer.STYLE_VIDEO_FILL);
             mSubscriberContainer.addView(mSubscriber.getView());
         }
@@ -230,7 +221,10 @@ public class CallActivity extends AppCompatActivity implements Session.SessionLi
                 // TODO: turn keepScreenOn off
                 // TODO: possibly dismiss this activity if and incoming call was declined
                 mStatusTextView.setText("Call Ended");
-                // publisher and subscriber container will be emptied as the session disconnect completes
+
+                mPublisherContainer.removeAllViews();
+                mSubscriberContainer.removeAllViews();
+
                 mStatusTextView.setVisibility(View.VISIBLE);
                 mIncomingActionsBar.setVisibility(View.GONE);
                 mEndCallButton.setVisibility(View.GONE);
@@ -239,14 +233,10 @@ public class CallActivity extends AppCompatActivity implements Session.SessionLi
             default:
                 // this case applies before the call data has arrived, and after it has arrived but before the session has connected
                 // TODO: reset all the other parts of the UI
-                if (mCallSession == null) {
-                    mStatusTextView.setText("Loading...");
+                if (mIsSender) {
+                    mStatusTextView.setText("Calling...");
                 } else {
-                    if (mIsSender) {
-                        mStatusTextView.setText("Calling...");
-                    } else {
-                        mStatusTextView.setText("Incoming call from " + mSenderUserId);
-                    }
+                    mStatusTextView.setText("Incoming call from " + mSenderUserId);
                 }
                 break;
         }
@@ -269,7 +259,6 @@ public class CallActivity extends AppCompatActivity implements Session.SessionLi
         // object cleanup
         mCallSession = null;
         mPublisher = null;
-        mPublisherContainer.removeAllViews();
     }
 
     @Override
@@ -296,7 +285,6 @@ public class CallActivity extends AppCompatActivity implements Session.SessionLi
         // TODO: detect if this was part of a normal end call flow, or an error condition
         // object cleanup
         mSubscriber = null;
-        mSubscriberContainer.removeAllViews();
     }
 
     @Override

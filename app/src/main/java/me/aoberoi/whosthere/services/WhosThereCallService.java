@@ -26,21 +26,11 @@ public class WhosThereCallService extends FirebaseMessagingService {
         Log.d(TAG, "Message Data: " + messageData);
 
         String callId = messageData.keySet().iterator().next();
-        startCall(callId);
-//        try {
-//            JSONObject callDetails = new JSONObject(messageData.get(callId));
-//            if (callDetails.getJSONObject("to").isNull("opentokToken")) {
-//                // TODO: handle being the sender
-//            } else {
-//                //sendNotification(callId, messageData.get(callId));
-//                startIncomingCall(callId, messageData.get(callId));
-//            }
-//        } catch (JSONException e) {
-//            Log.e(TAG, "Could not parse call JSON: " + e.getMessage());
-//        }
-
+        String callDetails = messageData.get(callId);
+        startCall(callId, callDetails);
     }
 
+    // TODO: perhaps post a notification if the phone is not locked/inactive
 //    private void sendNotification(String callId, String callDetails) {
 //        Intent intent = new Intent(this, CallActivity.class);
 //        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
@@ -65,12 +55,11 @@ public class WhosThereCallService extends FirebaseMessagingService {
 //        notificationManager.notify(0 /* ID of notification */, notificationBuilder.build());
 //    }
 
-    private void startCall(String callId) {
+    private void startCall(String callId, String callDetails) {
         Intent intent = new Intent(this, CallActivity.class);
         intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         intent.putExtra(CallConstants.EXTRA_CALL_ID, callId);
-//        intent.putExtra(CallConstants.EXTRA_CALL_DETAILS, callDetails);
-//        intent.putExtra(CallConstants.EXTRA_IS_INCOMING, true);
+        intent.putExtra(CallConstants.EXTRA_CALL_DETAILS, callDetails);
         this.startActivity(intent);
     }
 }
