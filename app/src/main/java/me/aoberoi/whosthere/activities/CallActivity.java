@@ -38,6 +38,12 @@ import me.aoberoi.whosthere.constants.CallConstants;
 
 // TODO: backgrounding support
 // TODO: "back" button ends the call
+
+// The Call activity should be used in a standalone task (not part of the application's
+// back stack). It does not support backgrounding, and therefore does not implement
+// the onSaveInstance() callback nor restore any previous state in onCreate(). When
+// this activity transitions to being stopped, it destroys all of its instance data
+// and gracefully disconnects the stateful connections it carries. (TODO)
 public class CallActivity extends AppCompatActivity implements Session.SessionListener {
 
     private static final String TAG = "CallActivity";
@@ -82,12 +88,10 @@ public class CallActivity extends AppCompatActivity implements Session.SessionLi
         @Override
         public void onDataChange(DataSnapshot dataSnapshot) {
             Log.d(TAG, "end call data change: " + dataSnapshot.getValue());
-            // TODO: handle call end
             mEndedAt = (Long) dataSnapshot.getValue();
             if (mEndedAt != null) {
                 Log.d(TAG, "tearing down the call");
-                // TODO: check if connected
-                if (mCallSession != null) {
+                if (mCallSession != null && mCallSession.getConnection() != null) {
                     mCallSession.disconnect();
                 }
                 setUserInterfaceState(UserInterfaceState.CALL_ENDED);
@@ -159,6 +163,12 @@ public class CallActivity extends AppCompatActivity implements Session.SessionLi
     @Override
     protected void onStop() {
         super.onStop();
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        // TODO: end any call that arrives during this call
     }
 
     private void setupCall() {
@@ -259,11 +269,13 @@ public class CallActivity extends AppCompatActivity implements Session.SessionLi
                 }
                 break;
         }
+        mUserInterfaceState = state;
     }
 
     @Override
     public void onConnected(Session session) {
         if (mIsSender) {
+            // TODO: publish without audio so that ring back is still audible
             startPublishing();
             setUserInterfaceState(UserInterfaceState.INVITATION_OUTGOING);
         } else {
@@ -288,6 +300,7 @@ public class CallActivity extends AppCompatActivity implements Session.SessionLi
             mCallSession.subscribe(mSubscriber);
             if (mIsSender) {
                 // call has been accepted
+                mRingtone.stop();
                 setUserInterfaceState(UserInterfaceState.CALL_IN_PROGRESS);
             } else {
                 // stream is from incoming invitation

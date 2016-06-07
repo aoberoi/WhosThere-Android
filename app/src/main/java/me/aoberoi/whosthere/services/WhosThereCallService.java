@@ -57,7 +57,8 @@ public class WhosThereCallService extends FirebaseMessagingService {
 
     private void startCall(String callId, String callDetails) {
         Intent intent = new Intent(this, CallActivity.class);
-        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        //intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         intent.putExtra(CallConstants.EXTRA_CALL_ID, callId);
         intent.putExtra(CallConstants.EXTRA_CALL_DETAILS, callDetails);
         this.startActivity(intent);

@@ -7,6 +7,9 @@
     android:layout_height="match_parent"
     tools:context=".activities.CallActivity">
 
+    <!-- TODO: all Button objects with backgroundTint defined do not work properly
+    on 19 <= API VERSION < 21. Perhaps conditionally use a drawable to provide
+    tinted button backgrounds -->
     <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
