@@ -32,257 +32,391 @@ import com.google.firebase.database.DatabaseReference;
 import com.google.firebase.database.FirebaseDatabase;
 import com.google.firebase.database.ServerValue;
 import com.google.firebase.database.ValueEventListener;
-import com.google.firebase.iid.FirebaseInstanceId;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Objects;
+import java.util.Set;
 
+import me.aoberoi.whosthere.BuildConfig;
 import me.aoberoi.whosthere.R;
+import me.aoberoi.whosthere.constants.CallConstants;
 import me.aoberoi.whosthere.constants.RegistrationConstants;
 
 public class MainActivity extends AppCompatActivity {
+
+    private static final String TAG = "MainActivity";
+
+    /*
+     * ------------------------------------------------------------------------
+     * Activity Lifecycle
+     * ------------------------------------------------------------------------
+     */
+
+    // TODO: onSaveInstanceState and onRestoreInstanceState to save "model" objects from the instance like user and token
+
+    private SharedPreferences mPreferences;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+
+        // Set up user interface
+        setContentView(R.layout.activity_main);
+        loggedInStateLabel = (TextView) findViewById(R.id.loggedInStateLabel);
+        callButton = (Button) findViewById(R.id.callButton);
+        recipientContactIdField = (EditText) findViewById(R.id.recipientContactIdField);
+
+        mPreferences = PreferenceManager.getDefaultSharedPreferences(this);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+
+        requestSystemPermissions();
+
+        // Kick off user authentication
+        mAuth.addAuthStateListener(mAuthListener);
+        if (mUser == null) {
+            mAuth.signInAnonymously().addOnCompleteListener(this, mSignInCompleteListener);
+        }
+
+        // If a device token was stored by the WhosThereInstanceIdService when
+        // this activity was not in the "resumed" state, then this activity
+        // needs to load the stored device token from the mPreferences
+        loadDeviceTokenFromPreferences();
+
+        // Register to receive device token updates
+        LocalBroadcastManager.getInstance(this).registerReceiver(
+                mTokenRefreshReceiver, new IntentFilter(RegistrationConstants.ACTION_TOKEN_REFRESHED));
+
+        // When resuming from an ended call, make sure the call request in progress is cleared
+        loadCallRequestState();
+        mPreferences.registerOnSharedPreferenceChangeListener(this.mPreferenceChangedListener);
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+
+        // Stop listener from receiving user authentication updates while this
+        // activity is paused.
+        if (mAuthListener != null) {
+            mAuth.removeAuthStateListener(mAuthListener);
+        }
+
+        // Unregister to receive device token updates while this activity is
+        // paused. Any token changes will be persisted to the mPreferences.
+        LocalBroadcastManager.getInstance(this).unregisterReceiver(mTokenRefreshReceiver);
+
+        // Stop listening for preference changes on that clear the call request in progress
+        mPreferences.unregisterOnSharedPreferenceChangeListener(this.mPreferenceChangedListener);
+    }
+
+
+    /*
+     * ------------------------------------------------------------------------
+     * Call Requests
+     * ------------------------------------------------------------------------
+     */
+
+    private DatabaseReference mCallRequestsRef = FirebaseDatabase.getInstance().getReference("callRequests");
+    private String mCallRequestRecipient = "";
+    private String mCallRequestInProgress = null;
+    private Exception mCallRequestRecentFailure = null;
+    private boolean mHasCallRequestReceivedResponse = false;
+
+    public void createCallRequest(View callButton) {
+        HashMap<String, Object> callRequest = new HashMap<String, Object>();
+        mCallRequestRecipient = recipientContactIdField.getText().toString().trim();
+        callRequest.put("to", mCallRequestRecipient);
+        callRequest.put("from", mUser.getUid());
+        callRequest.put("timestamp", ServerValue.TIMESTAMP);
+
+        DatabaseReference newCallRequest = mCallRequestsRef.push();
+        setCallRequestInProgress(newCallRequest.getKey());
+
+        newCallRequest.setValue(callRequest, mCallRequestCreatedListener);
+
+        updateInterface();
+    }
+
+    private DatabaseReference.CompletionListener mCallRequestCreatedListener = new DatabaseReference.CompletionListener() {
+        @Override
+        public void onComplete(DatabaseError databaseError, DatabaseReference databaseReference) {
+            // There should never be more than one call request in progress, so a callback related to a different
+            // call request than the one in progress is violated invariant
+            if (BuildConfig.DEBUG && !(Objects.equals(databaseReference.getKey(), mCallRequestInProgress))) {
+                throw new AssertionError(databaseReference.getKey());
+            }
+
+            if (databaseError != null) {
+                Log.e(TAG, "Failed to create call request: " + databaseError.getMessage() + " " + databaseError.getDetails());
+                mCallRequestRecentFailure = databaseError.toException();
+                setCallRequestInProgress(null);
+            } else {
+                Log.d(TAG, "Created call request: " + databaseReference.getKey());
+            }
+
+            updateInterface();
+        }
+    };
+
+    private SharedPreferences.OnSharedPreferenceChangeListener mPreferenceChangedListener = new SharedPreferences.OnSharedPreferenceChangeListener() {
+        @Override
+        public void onSharedPreferenceChanged(SharedPreferences sharedPreferences, String key) {
+            loadCallRequestState();
+        }
+    };
+
+    private void setCallRequestInProgress(String callRequestId) {
+        if (!Objects.equals(mCallRequestInProgress, callRequestId)) {
+
+            Set<String> callRequestsWaitedOn = mPreferences.getStringSet(CallConstants.CALL_REQUESTS_WAITED_ON_BY_ACTIVITIES, null);
+
+            if (callRequestId == null) {
+                // Delete the callRequestId from the set, if it is present
+                if (callRequestsWaitedOn != null) {
+                    callRequestsWaitedOn.remove(mCallRequestInProgress);
+                    mPreferences.edit()
+                            .putStringSet(CallConstants.CALL_REQUESTS_WAITED_ON_BY_ACTIVITIES, callRequestsWaitedOn)
+                            .apply();
+                }
+            } else {
+                // Add the callRequestId to the set, if it is not present
+                Set<String> combined;
+                if (callRequestsWaitedOn == null) {
+                    callRequestsWaitedOn = new HashSet<String>();
+                }
+                callRequestsWaitedOn.add(callRequestId);
+                mPreferences.edit()
+                        .putStringSet(CallConstants.CALL_REQUESTS_WAITED_ON_BY_ACTIVITIES, callRequestsWaitedOn)
+                        .apply();
+            }
+
+            mCallRequestInProgress = callRequestId;
+        }
+    }
+
+    private void loadCallRequestState() {
+        Set<String> callRequestsWaitedOn = mPreferences.getStringSet(CallConstants.CALL_REQUESTS_WAITED_ON_BY_ACTIVITIES, null);
+
+        if (mCallRequestInProgress != null &&
+                callRequestsWaitedOn != null &&
+                !callRequestsWaitedOn.contains(mCallRequestInProgress)) {
+            setCallRequestInProgress(null);
+            mCallRequestRecipient = "";
+            updateInterface();
+        }
+    }
+
+    /*
+     * ------------------------------------------------------------------------
+     * User Interface
+     * ------------------------------------------------------------------------
+     */
+
+    private TextView loggedInStateLabel;
+    private Button callButton;
+    private EditText recipientContactIdField;
+
+    private void updateInterface() {
+
+        // Determine if the call form should be enabled or not
+        if (mUser != null &&
+                mCallRequestInProgress == null &&
+                !mHasUserAndTokenSyncFailed &&
+                !mHasUserAuthenticationFailed &&
+                mDeniedPermissions.size() == 0) {
+
+            // Enable the call form
+            callButton.setEnabled(true);
+            recipientContactIdField.setEnabled(true);
+            if (!mCallRequestRecipient.equals(recipientContactIdField.getText())) {
+                recipientContactIdField.setText(mCallRequestRecipient);
+            }
+
+            // Populate UI related to user identity
+            loggedInStateLabel.setText(mUser.getUid());
+
+            // Clear stale state related to call requests that are no longer in progress
+            // TODO: hide UI that a call request is in progress
+            if (mHasCallRequestReceivedResponse) {
+                recipientContactIdField.setText("");
+                mHasCallRequestReceivedResponse = false;
+            }
+
+            // Display failures related to call request that recently was in progress
+            if (mCallRequestRecentFailure != null) {
+                recipientContactIdField.selectAll();
+                // TODO: inspect actual error to display a more appropriate message, localize
+                Toast.makeText(MainActivity.this, "Invalid Contact ID, try again.", Toast.LENGTH_SHORT).show();
+                mCallRequestRecentFailure = null;
+            }
+
+            // TODO: hide UI to re-request permissions
+            // TODO: hide UI for user and token sync failure
+            // TODO: hide UI for user authentication failure
+
+        } else {
+
+            // Disable the call form
+            callButton.setEnabled(false);
+
+            // Populate UI related to user identity
+            if (mUser == null) {
+                if (mHasUserAuthenticationFailed) {
+                    // TODO: localize
+                    // TODO: more helpful error conditions, retry?
+                    loggedInStateLabel.setText("User Authentication Failure");
+                } else {
+                    // TODO: store this in a strings resource, localize
+                    loggedInStateLabel.setText("Not Logged In");
+                }
+            }
+
+            // Display state related to an in progress call request
+            if (mCallRequestInProgress != null) {
+                recipientContactIdField.setEnabled(false);
+                // TODO: show UI that a call request is in progress
+            }
+
+            // Display failures related to system permissions
+            if (mDeniedPermissions.size() > 0) {
+                // TODO: localize
+                String errorMessage;
+                if (mDeniedPermissions.contains(Manifest.permission.RECORD_AUDIO) && mDeniedPermissions.contains(Manifest.permission.CAMERA)) {
+                    // User denied both permissions
+                    errorMessage = "Permissions for the camera and microphone are necessary for calls. ";
+                } else if (mDeniedPermissions.contains(Manifest.permission.RECORD_AUDIO)) {
+                    // User denied only RECORD_AUDIO
+                    errorMessage = "Permission for the microphone is necessary for calls. ";
+                } else {
+                    // User denied only CAMERA
+                    errorMessage = "Permission for the camera is necessary for calls. ";
+                }
+                Toast.makeText(MainActivity.this, errorMessage, Toast.LENGTH_LONG).show();
+            }
+
+            // Display failures related to device registration
+            if (mHasUserAndTokenSyncFailed) {
+                // TODO: show UI for user and token sync failure
+            }
+        }
+    }
+
+
+    /*
+     * ------------------------------------------------------------------------
+     * User Authentication
+     * ------------------------------------------------------------------------
+     */
+
+    private FirebaseUser mUser;
+    private FirebaseAuth mAuth = FirebaseAuth.getInstance();
+    private boolean mHasUserAuthenticationFailed = false;
+
+    private OnCompleteListener<AuthResult> mSignInCompleteListener = new OnCompleteListener<AuthResult>() {
+        @Override
+        public void onComplete(@NonNull Task<AuthResult> task) {
+            Log.d(TAG, "Sign in completed.");
+            if (!task.isSuccessful()) {
+                Log.w(TAG, "Sign in unsuccessful: ", task.getException());
+                mHasUserAuthenticationFailed = true;
+            } else {
+                Log.d(TAG, "Sign in successful.");
+                mHasUserAuthenticationFailed = false;
+            }
+            updateInterface();
+        }
+    };
+
+    private FirebaseAuth.AuthStateListener mAuthListener = new FirebaseAuth.AuthStateListener() {
+        @Override
+        public void onAuthStateChanged(@NonNull FirebaseAuth firebaseAuth) {
+            FirebaseUser user = firebaseAuth.getCurrentUser();
+            if (user != null) {
+                Log.d(TAG, "User signed in: " + user.getUid());
+                setUser(user);
+            } else {
+                Log.d(TAG, "User signed out.");
+                setUser(null);
+            }
+        }
+    };
+
+    private void setUser(FirebaseUser user) {
+        if (user != mUser) {
+            mUser = user;
+            syncUserAndToken();
+            updateInterface();
+        }
+    }
+
+    /*
+     * ------------------------------------------------------------------------
+     * Device Registration
+     * ------------------------------------------------------------------------
+     */
 
     // NOTE: This application is built with the assumption that every user is
     // only using one device. In order to work without that assumption, the
     // database structure would need to be modified and synchronization would
     // need to be bidirectional.
 
-    private static final String TAG = "MainActivity";
-    private static final int PERMISSIONS_REQUEST_CAMERA = 100;
-    private static final int PERMISSIONS_REQUEST_RECORD_AUDIO = 200;
-
-    private FirebaseAuth mAuth;
-    private FirebaseAuth.AuthStateListener mAuthListener;
-    private FirebaseUser mUser;
-    private DatabaseReference mCallRequestsRef;
-    private DatabaseReference mUsersRef;
+    private boolean mHasUserAndTokenSyncFailed = false;
+    private DatabaseReference mUsersRef = FirebaseDatabase.getInstance().getReference("users");
     private String mDeviceToken;
-
-    private TextView loggedInStateLabel;
-    private Button callButton;
-    private EditText recipientContactIdField;
-
 
     private BroadcastReceiver mTokenRefreshReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
             String refreshedToken = intent.getStringExtra(RegistrationConstants.EXTRA_ID_TOKEN);
-            Log.d(TAG, "mTokenRefreshReceiver:onReceive:token:" + refreshedToken);
+            Log.d(TAG, "Device token refreshed:" + refreshedToken);
             setDeviceToken(refreshedToken);
         }
     };
 
-    @Override
-    protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-
-        // Setup UI
-        setContentView(R.layout.activity_main);
-        loggedInStateLabel = (TextView) findViewById(R.id.loggedInStateLabel);
-        callButton = (Button) findViewById(R.id.callButton);
-        recipientContactIdField = (EditText) findViewById(R.id.recipientContactIdField);
-
-        // Setup Firebase database references
-        mCallRequestsRef = FirebaseDatabase.getInstance().getReference("callRequests");
-        mUsersRef = FirebaseDatabase.getInstance().getReference("users");
-
-        // Setup data
-        SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(this);
-        String storedDeviceToken = preferences.getString(RegistrationConstants.REGISTRATION_TOKEN, null);
+    private void loadDeviceTokenFromPreferences() {
+        String storedDeviceToken = mPreferences.getString(RegistrationConstants.REGISTRATION_TOKEN, null);
         setDeviceToken(storedDeviceToken);
-
-        // Setup Firebase authentication
-        mAuth = FirebaseAuth.getInstance();
-        mAuthListener = new FirebaseAuth.AuthStateListener() {
-            @Override
-            public void onAuthStateChanged(@NonNull FirebaseAuth firebaseAuth) {
-                FirebaseUser user = firebaseAuth.getCurrentUser();
-                if (user != null) {
-                    // User is signed in
-                    Log.d(TAG, "onAuthStateChanged:signed_in:" + user.getUid());
-                    setUser(user);
-                } else {
-                    // User is signed out
-                    Log.d(TAG, "onAuthStateChanged:signed_out:");
-                }
-            }
-        };
-
-        // Attach listeners
-        callButton.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                callButton.setEnabled(false);
-                recipientContactIdField.setEnabled(false);
-
-                HashMap<String, Object> callRequest = new HashMap<String, Object>();
-                callRequest.put("to", recipientContactIdField.getText().toString().trim());
-                callRequest.put("from", mUser.getUid());
-                callRequest.put("timestamp", ServerValue.TIMESTAMP);
-                mCallRequestsRef.push().setValue(callRequest, new DatabaseReference.CompletionListener() {
-                    @Override
-                    public void onComplete(DatabaseError databaseError, DatabaseReference databaseReference) {
-                        if (databaseError != null) {
-                            Log.e(TAG, "clickListener:setValue:onCompleteError " + databaseError.getMessage() + " " + databaseError.getDetails());
-                            callButton.setEnabled(true);
-                            recipientContactIdField.setEnabled(true);
-                            recipientContactIdField.selectAll();
-                            // TODO: inspect actual error to display a more appropriate message
-                            // TODO: localize
-                            Toast.makeText(MainActivity.this, "Invalid Contact ID, try again.", Toast.LENGTH_SHORT).show();
-                        } else {
-                            Log.d(TAG, "clickListener:setValue:onComplete");
-                        }
-                    }
-                });
-                // TODO: show an "in progress" UI
-            }
-        });
-    }
-
-    @Override
-    protected void onStart() {
-        super.onStart();
-        mAuth.addAuthStateListener(mAuthListener);
-
-
-        int cameraPermissionCheck = ContextCompat.checkSelfPermission(this,
-                Manifest.permission.CAMERA);
-        if (cameraPermissionCheck != PackageManager.PERMISSION_GRANTED) {
-            ActivityCompat.requestPermissions(this,
-                    new String[]{Manifest.permission.CAMERA},
-                    PERMISSIONS_REQUEST_CAMERA);
-        }
-        int audioPermissionCheck = ContextCompat.checkSelfPermission(this,
-                Manifest.permission.RECORD_AUDIO);
-        if (audioPermissionCheck != PackageManager.PERMISSION_GRANTED) {
-            ActivityCompat.requestPermissions(this,
-                    new String[]{Manifest.permission.RECORD_AUDIO},
-                    PERMISSIONS_REQUEST_RECORD_AUDIO);
-        }
-    }
-
-    @Override
-    protected void onStop() {
-        super.onStop();
-        if (mAuthListener != null) {
-            mAuth.removeAuthStateListener(mAuthListener);
-        }
-    }
-
-    @Override
-    protected void onResume() {
-        super.onResume();
-        if (mUser == null) {
-            mAuth.signInAnonymously().addOnCompleteListener(this, new OnCompleteListener<AuthResult>() {
-                @Override
-                public void onComplete(@NonNull Task<AuthResult> task) {
-                    Log.d(TAG, "signInAnonymously:onComplete:" + task.isSuccessful());
-
-                    // If sign in fails, display a message to the user. If sign in succeeds
-                    // the auth state listener will be notified and logic to handle the
-                    // signed in user can be handled in the listener.
-                    if (!task.isSuccessful()) {
-                        Log.w(TAG, "signInAnonymously", task.getException());
-                        Toast.makeText(MainActivity.this, "Authentication failed.",
-                                Toast.LENGTH_SHORT).show();
-                    } else {
-                        String deviceToken = FirebaseInstanceId.getInstance().getId();
-                        long deviceTokenCreationTime = FirebaseInstanceId.getInstance().getCreationTime();
-                    }
-                }
-            });
-        }
-
-        LocalBroadcastManager.getInstance(this).registerReceiver(
-                mTokenRefreshReceiver, new IntentFilter(RegistrationConstants.ACTION_TOKEN_REFRESHED));
-    }
-
-    @Override
-    protected void onPause() {
-        super.onPause();
-        LocalBroadcastManager.getInstance(this).unregisterReceiver(mTokenRefreshReceiver);
-    }
-
-    @Override
-    public void onRequestPermissionsResult(int requestCode,
-                                           String permissions[], int[] grantResults) {
-        switch (requestCode) {
-            case PERMISSIONS_REQUEST_CAMERA: {
-                // If request is cancelled, the result arrays are empty.
-                if (grantResults.length > 0
-                        && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-
-                    // permission was granted, yay! Do the
-                    // contacts-related task you need to do.
-
-                } else {
-                    Toast.makeText(MainActivity.this, "You denied permission to the camera.", Toast.LENGTH_SHORT).show();
-                }
-                return;
-            }
-            case PERMISSIONS_REQUEST_RECORD_AUDIO: {
-                // If request is cancelled, the result arrays are empty.
-                if (grantResults.length > 0
-                        && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-
-                    // permission was granted, yay! Do the
-                    // contacts-related task you need to do.
-
-                } else {
-                    Toast.makeText(MainActivity.this, "You denied permission to the microphone.", Toast.LENGTH_SHORT).show();
-                }
-                return;
-            }
-
-        }
-    }
-
-    private void setUser(FirebaseUser user) {
-        if (user != mUser) {
-            mUser = user;
-            // TODO: use a shorter "contact ID" because these strings can get super long
-            //       we would need to save this to the database and therefore this method
-            //       would become asynchronous
-            if (mUser != null) {
-                callButton.setEnabled(true);
-                loggedInStateLabel.setText(user.getUid());
-                syncRemoteUser();
-            } else {
-                callButton.setEnabled(false);
-                // TODO: store this in a strings resource, so that it isn't
-                //       duplicated in the layout resource
-                loggedInStateLabel.setText("Not Logged In");
-            }
-        }
     }
 
     private void setDeviceToken(String token) {
-        if (token != mDeviceToken) {
+        if (!Objects.equals(token, mDeviceToken)) {
             mDeviceToken = token;
-
-            if (mDeviceToken != null) {
-                syncRemoteUser();
-            }
+            syncUserAndToken();
         }
     }
 
-    private void syncRemoteUser() {
-        Log.d(TAG, "syncRemoteUser");
+    private void syncUserAndToken() {
         if (mUser != null && mDeviceToken != null) {
+            Log.d(TAG, "User and token present.");
+
+            // Read any existing device token for this user
             mUsersRef.child(mUser.getUid()).addListenerForSingleValueEvent(new ValueEventListener() {
                 @Override
                 public void onDataChange(DataSnapshot dataSnapshot) {
-                    Log.d(TAG, "syncRemoteUser:readSuccess");
-                    String value = (String) dataSnapshot.getValue();
-                    if (!mDeviceToken.equals(value)) {
+                    Log.d(TAG, "Remote user data read.");
+                    String existingToken = (String) dataSnapshot.getValue();
+
+                    // If the read remote token is not equal to the local token...
+                    if (!mDeviceToken.equals(existingToken)) {
+                        Log.d(TAG, "User and device token mismatch. Device token will be set.");
+
+                        // Set the remote token to the local token
                         mUsersRef.child(mUser.getUid()).setValue(mDeviceToken, new DatabaseReference.CompletionListener() {
                             @Override
                             public void onComplete(DatabaseError databaseError, DatabaseReference databaseReference) {
                                 if (databaseError == null) {
-                                    Log.d(TAG, "syncRemoteUser:writeSuccess");
+                                    Log.d(TAG, "Device token set for user.");
                                 } else {
-                                    Log.e(TAG, "syncRemoteUser:writeFail " + databaseError.getMessage());
+                                    Log.e(TAG, "Device token failed to be set for user. Error: " + databaseError.getMessage());
                                 }
+                                mHasUserAndTokenSyncFailed = (databaseError != null);
+                                updateInterface();
                             }
                         });
                     }
@@ -290,11 +424,82 @@ public class MainActivity extends AppCompatActivity {
 
                 @Override
                 public void onCancelled(DatabaseError databaseError) {
-                    Log.d(TAG, "syncRemoteUser:readFail " + databaseError.getMessage());
+                    Log.d(TAG, "Remote user data failed to be read. Error: " + databaseError.getMessage());
+                    mHasUserAndTokenSyncFailed = true;
+                    updateInterface();
                 }
             });
         }
     }
 
 
+    /*
+     * ------------------------------------------------------------------------
+     * System Permissions
+     * ------------------------------------------------------------------------
+     */
+
+    // TODO: extract this into a helper that can be used in both activities
+    //       this is not strictly necessary since the user/token sync will not
+    //       take place until this activity is launched. so a first time user
+    //       will already need to interact with this activity and grant
+    //       grant permissions. it would be useful for situations where the
+    //       permission was revoked after already being granted once.
+
+    private static final int PERMISSIONS_REQUEST_CAMERA_AND_RECORD_AUDIO = 100;
+    private ArrayList<String> mDeniedPermissions = new ArrayList<>();
+
+    private void requestSystemPermissions() {
+
+        // Create a list of permissions that are not already granted
+        ArrayList<String> permissionsNeeded = new ArrayList<>();
+        if (ContextCompat.checkSelfPermission(this,
+                Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            permissionsNeeded.add(Manifest.permission.CAMERA);
+        }
+        if (ContextCompat.checkSelfPermission(this,
+                Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            permissionsNeeded.add(Manifest.permission.RECORD_AUDIO);
+        }
+
+        // Request the permissions that are not already granted
+        if (permissionsNeeded.size() != 0) {
+            String[] permissionsToRequest = permissionsNeeded.toArray(new String[permissionsNeeded.size()]);
+
+            // NOTE: even when some permissions are denied, since the system dialog
+            // partially covers the activity, the activity's onResume() lifecycle
+            // method will be called, and then the remaining permissions will be
+            // requested. This effectively blocks the UI of the whole app until
+            // permissions are granted.
+            ActivityCompat.requestPermissions(this,
+                    permissionsToRequest,
+                    PERMISSIONS_REQUEST_CAMERA_AND_RECORD_AUDIO);
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode,
+                                           @NonNull String permissions[], @NonNull int[] grantResults) {
+        switch (requestCode) {
+            case PERMISSIONS_REQUEST_CAMERA_AND_RECORD_AUDIO: {
+                // If request is cancelled, the result arrays are empty.
+                if (grantResults.length > 0) {
+
+                    // Create a list of permissions that were denied
+                    ArrayList<String> deniedPermissions = new ArrayList<>();
+                    for (int i = 0; i < permissions.length; i++) {
+                        if (grantResults[i] != PackageManager.PERMISSION_GRANTED) {
+                            deniedPermissions.add(permissions[i]);
+                        }
+                    }
+                    mDeniedPermissions = deniedPermissions;
+                    updateInterface();
+                }
+            }
+            default:
+                if (BuildConfig.DEBUG) {
+                    throw new AssertionError("Request code enumeration not handled: " + requestCode);
+                }
+        }
+    }
 }

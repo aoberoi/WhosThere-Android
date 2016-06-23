@@ -1,9 +1,12 @@
 package me.aoberoi.whosthere.activities;
 
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.media.Ringtone;
 import android.media.RingtoneManager;
 import android.net.Uri;
+import android.os.Handler;
+import android.preference.PreferenceManager;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.util.Log;
@@ -33,6 +36,8 @@ import com.opentok.android.Subscriber;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.util.Set;
+
 import me.aoberoi.whosthere.R;
 import me.aoberoi.whosthere.constants.CallConstants;
 
@@ -60,6 +65,8 @@ public class CallActivity extends AppCompatActivity implements Session.SessionLi
     private String mRecipientUserId;
     private Long mInitiatedAt;
     private Long mEndedAt;
+    private String mRequestId;
+
     private Ringtone mRingtone;
 
     private DatabaseReference mCallEndedAtRef;
@@ -74,7 +81,7 @@ public class CallActivity extends AppCompatActivity implements Session.SessionLi
     private Button mEndCallButton;
     private LinearLayout mIncomingActionsBar;
 
-    private enum UserInterfaceState {
+    private enum CallState {
         INITIALIZING,
         INVITATION_OUTGOING,
         INVITATION_INCOMING,
@@ -82,7 +89,7 @@ public class CallActivity extends AppCompatActivity implements Session.SessionLi
         CALL_ENDED
     }
 
-    private UserInterfaceState mUserInterfaceState;
+    private CallState mCallState;
 
     private ValueEventListener mEndCallListener = new ValueEventListener() {
         @Override
@@ -94,7 +101,27 @@ public class CallActivity extends AppCompatActivity implements Session.SessionLi
                 if (mCallSession != null && mCallSession.getConnection() != null) {
                     mCallSession.disconnect();
                 }
-                setUserInterfaceState(UserInterfaceState.CALL_ENDED);
+
+                SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(CallActivity.this);
+                Set<String> callRequestsWaitedOn = preferences.getStringSet(CallConstants.CALL_REQUESTS_WAITED_ON_BY_ACTIVITIES, null);
+                if (callRequestsWaitedOn != null) {
+                    if (callRequestsWaitedOn.contains(mRequestId)) {
+                        callRequestsWaitedOn.remove(mRequestId);
+                        preferences.edit()
+                                .putStringSet(CallConstants.CALL_REQUESTS_WAITED_ON_BY_ACTIVITIES, callRequestsWaitedOn)
+                                .apply();
+                    }
+                }
+
+                Handler automaticDismissHandler = new Handler();
+                automaticDismissHandler.postDelayed(new Runnable() {
+                    @Override
+                    public void run() {
+                        CallActivity.this.finish();
+                    }
+                }, 10000);
+
+                setUserInterfaceState(CallState.CALL_ENDED);
             }
         }
 
@@ -138,10 +165,11 @@ public class CallActivity extends AppCompatActivity implements Session.SessionLi
             mSenderUserId = callDetailsJSON.getString("from");
             mRecipientUserId = callDetailsJSON.getString("to");
             mInitiatedAt = callDetailsJSON.getLong("initiatedAt");
+            mRequestId = callDetailsJSON.getString("requestId");
             mIsSender = mSenderUserId.equals(callDetailsJSON.getString("id"));
 
             setupCall();
-            setUserInterfaceState(UserInterfaceState.INITIALIZING);
+            setUserInterfaceState(CallState.INITIALIZING);
         } catch (JSONException exception) {
             // TODO: display an error
             Log.e(TAG, "Error parsing call details: " + exception.getMessage());
@@ -191,7 +219,7 @@ public class CallActivity extends AppCompatActivity implements Session.SessionLi
     public void acceptCall(View acceptCallButton) {
         mRingtone.stop();
         startPublishing();
-        setUserInterfaceState(UserInterfaceState.CALL_IN_PROGRESS);
+        setUserInterfaceState(CallState.CALL_IN_PROGRESS);
     }
 
     public void declineCall(View declineCallButton) {
@@ -220,7 +248,27 @@ public class CallActivity extends AppCompatActivity implements Session.SessionLi
         }
     }
 
-    private void setUserInterfaceState(UserInterfaceState state) {
+    private void updateState(CallState state) {
+        if (mCallState != state) {
+            switch (mCallState) {
+                case INITIALIZING:
+                    break;
+                case INVITATION_OUTGOING:
+                    break;
+                case INVITATION_INCOMING:
+                    break;
+                case CALL_IN_PROGRESS:
+                    break;
+                case CALL_ENDED:
+                    break;
+                default: // null
+                    break;
+            }
+        }
+        mCallState = state;
+    }
+
+    private void setUserInterfaceState(CallState state) {
         switch(state) {
             case INVITATION_OUTGOING:
                 populatePublisherUserInterface();
@@ -269,7 +317,7 @@ public class CallActivity extends AppCompatActivity implements Session.SessionLi
                 }
                 break;
         }
-        mUserInterfaceState = state;
+        mCallState = state;
     }
 
     @Override
@@ -277,9 +325,9 @@ public class CallActivity extends AppCompatActivity implements Session.SessionLi
         if (mIsSender) {
             // TODO: publish without audio so that ring back is still audible
             startPublishing();
-            setUserInterfaceState(UserInterfaceState.INVITATION_OUTGOING);
+            setUserInterfaceState(CallState.INVITATION_OUTGOING);
         } else {
-            setUserInterfaceState(UserInterfaceState.INVITATION_INCOMING);
+            setUserInterfaceState(CallState.INVITATION_INCOMING);
         }
     }
 
@@ -301,10 +349,10 @@ public class CallActivity extends AppCompatActivity implements Session.SessionLi
             if (mIsSender) {
                 // call has been accepted
                 mRingtone.stop();
-                setUserInterfaceState(UserInterfaceState.CALL_IN_PROGRESS);
+                setUserInterfaceState(CallState.CALL_IN_PROGRESS);
             } else {
                 // stream is from incoming invitation
-                setUserInterfaceState(UserInterfaceState.INVITATION_INCOMING);
+                setUserInterfaceState(CallState.INVITATION_INCOMING);
                 mSubscriber.setSubscribeToAudio(false);
             }
         } else {
