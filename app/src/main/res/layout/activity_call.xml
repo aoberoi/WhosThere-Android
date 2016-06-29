@@ -44,7 +44,7 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:text="End"
-        android:id="@+id/endButton"
+        android:id="@+id/endCallButton"
         android:layout_alignParentBottom="true"
         android:layout_centerHorizontal="true"
         android:backgroundTint="@android:color/holo_red_dark"
@@ -64,7 +64,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="Accept"
-            android:id="@+id/acceptButton"
+            android:id="@+id/acceptCallButton"
             android:layout_weight="0.5"
             android:backgroundTint="@android:color/holo_green_dark"
             android:onClick="acceptCall"/>
@@ -73,7 +73,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="Decline"
-            android:id="@+id/declineButton"
+            android:id="@+id/declineCallButton"
             android:layout_weight="0.5"
             android:backgroundTint="@android:color/holo_red_dark"
             android:onClick="declineCall"/>
