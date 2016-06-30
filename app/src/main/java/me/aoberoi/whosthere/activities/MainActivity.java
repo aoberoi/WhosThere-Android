@@ -1,6 +1,7 @@
 package me.aoberoi.whosthere.activities;
 
 import android.Manifest;
+import android.app.Dialog;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -21,6 +22,8 @@ import android.widget.EditText;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.google.android.gms.common.ConnectionResult;
+import com.google.android.gms.common.GoogleApiAvailability;
 import com.google.android.gms.tasks.OnCompleteListener;
 import com.google.android.gms.tasks.Task;
 import com.google.firebase.auth.AuthResult;
@@ -77,6 +80,8 @@ public class MainActivity extends AppCompatActivity {
 
         requestSystemPermissions();
 
+        checkGooglePlayServices();
+
         // Kick off user authentication
         mAuth.addAuthStateListener(mAuthListener);
         if (mUser == null) {
@@ -99,8 +104,6 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onPause() {
-        super.onPause();
-
         // Stop listener from receiving user authentication updates while this
         // activity is paused.
         if (mAuthListener != null) {
@@ -113,6 +116,8 @@ public class MainActivity extends AppCompatActivity {
 
         // Stop listening for preference changes on that clear the call request in progress
         mPreferences.unregisterOnSharedPreferenceChangeListener(this.mPreferenceChangedListener);
+
+        super.onPause();
     }
 
 
@@ -167,6 +172,7 @@ public class MainActivity extends AppCompatActivity {
     private SharedPreferences.OnSharedPreferenceChangeListener mPreferenceChangedListener = new SharedPreferences.OnSharedPreferenceChangeListener() {
         @Override
         public void onSharedPreferenceChanged(SharedPreferences sharedPreferences, String key) {
+            Log.d(TAG, "Invoked shared preference change handler.");
             loadCallRequestState();
         }
     };
@@ -203,11 +209,13 @@ public class MainActivity extends AppCompatActivity {
     private void loadCallRequestState() {
         Set<String> callRequestsWaitedOn = mPreferences.getStringSet(CallConstants.CALL_REQUESTS_WAITED_ON_BY_ACTIVITIES, null);
 
+        Log.d(TAG, "Loaded call request state");
         if (mCallRequestInProgress != null &&
                 callRequestsWaitedOn != null &&
                 !callRequestsWaitedOn.contains(mCallRequestInProgress)) {
             setCallRequestInProgress(null);
             mCallRequestRecipient = "";
+            Log.d(TAG, "Cleared call request in progress");
             updateInterface();
         }
     }
@@ -229,9 +237,11 @@ public class MainActivity extends AppCompatActivity {
                 mCallRequestInProgress == null &&
                 !mHasUserAndTokenSyncFailed &&
                 !mHasUserAuthenticationFailed &&
+                mArePlayServicesAvailable &&
                 mDeniedPermissions.size() == 0) {
 
             // Enable the call form
+            Log.d(TAG, "Enabling call form");
             callButton.setEnabled(true);
             recipientContactIdField.setEnabled(true);
             if (!mCallRequestRecipient.equals(recipientContactIdField.getText())) {
@@ -263,6 +273,7 @@ public class MainActivity extends AppCompatActivity {
         } else {
 
             // Disable the call form
+            Log.d(TAG, "Disabling call form");
             callButton.setEnabled(false);
 
             // Populate UI related to user identity
@@ -303,6 +314,11 @@ public class MainActivity extends AppCompatActivity {
             // Display failures related to device registration
             if (mHasUserAndTokenSyncFailed) {
                 // TODO: show UI for user and token sync failure
+            }
+
+            // Display failures related to Google Play Services
+            if (!mArePlayServicesAvailable) {
+                // TODO: show UI
             }
         }
     }
@@ -481,7 +497,7 @@ public class MainActivity extends AppCompatActivity {
     public void onRequestPermissionsResult(int requestCode,
                                            @NonNull String permissions[], @NonNull int[] grantResults) {
         switch (requestCode) {
-            case PERMISSIONS_REQUEST_CAMERA_AND_RECORD_AUDIO: {
+            case PERMISSIONS_REQUEST_CAMERA_AND_RECORD_AUDIO:
                 // If request is cancelled, the result arrays are empty.
                 if (grantResults.length > 0) {
 
@@ -495,11 +511,41 @@ public class MainActivity extends AppCompatActivity {
                     mDeniedPermissions = deniedPermissions;
                     updateInterface();
                 }
-            }
+                break;
             default:
                 if (BuildConfig.DEBUG) {
                     throw new AssertionError("Request code enumeration not handled: " + requestCode);
                 }
         }
+    }
+
+    /*
+     * ------------------------------------------------------------------------
+     * Google Play Services
+     * ------------------------------------------------------------------------
+     */
+
+    private boolean mArePlayServicesAvailable = false;
+    private static final int PLAY_SERVICES_RESOLUTION_REQUEST = 9000;
+
+
+    // TODO: the dialog presentation and handling of its dismissal is naive
+    private void checkGooglePlayServices() {
+        GoogleApiAvailability apiAvailability = GoogleApiAvailability.getInstance();
+        int resultCode = apiAvailability.isGooglePlayServicesAvailable(this);
+        if (resultCode != ConnectionResult.SUCCESS) {
+            if (apiAvailability.isUserResolvableError(resultCode)) {
+                Dialog errorDialog = apiAvailability.getErrorDialog(this, resultCode, PLAY_SERVICES_RESOLUTION_REQUEST);
+                errorDialog.show();
+            } else {
+                Log.i(TAG, "This device is not supported.");
+                // TODO: show some UI
+                // finish();
+            }
+            mArePlayServicesAvailable = false;
+        } else {
+            mArePlayServicesAvailable = true;
+        }
+        updateInterface();
     }
 }

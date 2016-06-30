@@ -27,6 +27,8 @@ import me.aoberoi.whosthere.models.Call;
 // TODO: ringtone sound only for recipient and a "ring back" sound on the sender
 // TODO: use MediaPlayer and AudioAttributes
 // TODO: query system for mute/ringer/vibrate settings and mimic them.
+// TODO: what about rotation?
+// TODO: phone call interuption?
 
 // The Call activity should be used in a standalone task (not part of the application's
 // back stack).
@@ -74,6 +76,21 @@ public class CallActivity extends AppCompatActivity implements Observer {
     }
 
     @Override
+    protected void onDestroy() {
+        if (mRingtone != null) {
+            mRingtone.stop();
+        }
+        mRingtone = null;
+
+        if (mCall != null) {
+            mCall.end();
+        }
+        mCall = null;
+
+        super.onDestroy();
+    }
+
+    @Override
     protected void onStart() {
         super.onStart();
 
@@ -84,16 +101,9 @@ public class CallActivity extends AppCompatActivity implements Observer {
 
     @Override
     protected void onStop() {
-        super.onStop();
-
         mCall.deleteObserver(this);
-    }
 
-    @Override
-    protected void onPause() {
-        super.onPause();
-
-        mCall.onPause();
+        super.onStop();
     }
 
     @Override
@@ -104,13 +114,10 @@ public class CallActivity extends AppCompatActivity implements Observer {
     }
 
     @Override
-    protected void onDestroy() {
-        super.onDestroy();
+    protected void onPause() {
+        mCall.onPause();
 
-        if (mCall != null) {
-            mCall.end();
-        }
-        mCall = null;
+        super.onPause();
     }
 
     /*

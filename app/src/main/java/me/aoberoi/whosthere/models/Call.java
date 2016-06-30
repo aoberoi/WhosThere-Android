@@ -378,15 +378,19 @@ public class Call extends Observable implements Session.SessionListener {
         }
     };
 
+    private boolean mSessionResumeListenersSet = false;
+
     public void onPause() {
         if (mOpenTokSession != null) {
             mOpenTokSession.onPause();
+            mSessionResumeListenersSet = false;
         }
     }
 
     public void onResume() {
         if (mOpenTokSession != null) {
             mOpenTokSession.onResume();
+            mSessionResumeListenersSet = true;
         }
     }
 
@@ -418,6 +422,14 @@ public class Call extends Observable implements Session.SessionListener {
     public void onDisconnected(Session session) {
         if (isEnding()) {
             // Clean up
+
+            // Since mOpenTokSession.onResume() registers listeners that only
+            // get unregistered in mOpenTokSession.onPause(), its important
+            // to call this method to make sure IntentReceivers are not leaked.
+            if (mSessionResumeListenersSet) {
+                mOpenTokSession.onPause();
+            }
+
             mOpenTokSession = null;
             setPublisher(null);
             setSubscriber(null);
