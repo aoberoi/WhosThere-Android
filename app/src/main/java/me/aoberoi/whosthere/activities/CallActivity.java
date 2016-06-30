@@ -1,5 +1,6 @@
 package me.aoberoi.whosthere.activities;
 
+import android.content.Intent;
 import android.media.Ringtone;
 import android.media.RingtoneManager;
 import android.os.Handler;
@@ -22,17 +23,13 @@ import me.aoberoi.whosthere.R;
 
 import me.aoberoi.whosthere.models.Call;
 
-// TODO: backgrounding support
 // TODO: "back" button ends the call
 // TODO: ringtone sound only for recipient and a "ring back" sound on the sender
 // TODO: use MediaPlayer and AudioAttributes
 // TODO: query system for mute/ringer/vibrate settings and mimic them.
 
 // The Call activity should be used in a standalone task (not part of the application's
-// back stack). It does not support backgrounding, and therefore does not implement
-// the onSaveInstance() callback nor restore any previous state in onCreate(). When
-// this activity transitions to being stopped, it destroys all of its instance data
-// and gracefully disconnects the stateful connections it carries. (TODO)
+// back stack).
 public class CallActivity extends AppCompatActivity implements Observer {
 
     private static final String TAG = "CallActivity";
@@ -45,6 +42,11 @@ public class CallActivity extends AppCompatActivity implements Observer {
 
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        if (wasLaunchedFromRecents()) {
+            complete();
+            return;
+        }
 
         // Set up user interface
         setContentView(R.layout.activity_call);
@@ -63,13 +65,18 @@ public class CallActivity extends AppCompatActivity implements Observer {
         mRingtone = RingtoneManager.getRingtone(getApplicationContext(), RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE));
 
         mCall = Call.fromIntent(this, getIntent());
+        if (mCall == null) {
+            Log.e(TAG, "No call available");
+            complete();
+            return;
+        }
+        mCall.begin();
     }
 
     @Override
     protected void onStart() {
         super.onStart();
 
-        mCall.begin();
         mCall.addObserver(this);
 
         updateInterface();
@@ -80,6 +87,30 @@ public class CallActivity extends AppCompatActivity implements Observer {
         super.onStop();
 
         mCall.deleteObserver(this);
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+
+        mCall.onPause();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+
+        mCall.onResume();
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+
+        if (mCall != null) {
+            mCall.end();
+        }
+        mCall = null;
     }
 
     /*
@@ -143,7 +174,7 @@ public class CallActivity extends AppCompatActivity implements Observer {
                         // TODO: how to find out if activity is "started" when this is run?
                         // will activity be destroyed when someone hits the back button before the timeout?
                         // try out receiving another call this way
-                        CallActivity.this.finish();
+                        CallActivity.this.complete();
                     }
                 }, 10000);
                 mDismissalScheduled = true;
@@ -208,6 +239,20 @@ public class CallActivity extends AppCompatActivity implements Observer {
             mPublisherContainer.removeAllViews();
             mPublisherContainer.setVisibility(View.GONE);
         }
+    }
+
+    public void complete() {
+        if (android.os.Build.VERSION.SDK_INT >= 21) {
+            Log.d(TAG, "Completing and removing task");
+            finishAndRemoveTask();
+        } else {
+            Log.d(TAG, "Completing");
+            finish();
+        }
+    }
+
+    protected boolean wasLaunchedFromRecents() {
+        return (getIntent().getFlags() & Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) == Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY;
     }
 
     /*

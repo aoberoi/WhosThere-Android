@@ -20,8 +20,7 @@
         <activity android:name=".activities.CallActivity"
                   android:theme="@style/AppTheme.NoActionBar"
                   android:launchMode="singleInstance"
-                  android:taskAffinity=""
-                  android:excludeFromRecents="true">
+                  android:taskAffinity="">
             <intent-filter>
                 <action android:name="INCOMING_CALL"/>
                 <category android:name="android.intent.category.DEFAULT"/>

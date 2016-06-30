@@ -60,6 +60,7 @@ public class WhosThereCallService extends FirebaseMessagingService {
         activityIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
         activityIntent.putExtra(CallConstants.EXTRA_CALL_ID, callId);
         activityIntent.putExtra(CallConstants.EXTRA_CALL_DETAILS, callDetails);
+        Log.d(TAG, "Starting CallActivity");
         this.startActivity(activityIntent);
     }
 }

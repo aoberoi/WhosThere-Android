@@ -4,6 +4,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.preference.PreferenceManager;
+import android.support.annotation.Nullable;
 import android.util.Log;
 import android.view.SurfaceView;
 
@@ -60,6 +61,7 @@ public class Call extends Observable implements Session.SessionListener {
         mContext = context;
     }
 
+    @Nullable
     public static Call fromIntent(Context context, Intent callIntent) {
         Call call = new Call(context);
 
@@ -77,10 +79,11 @@ public class Call extends Observable implements Session.SessionListener {
             call.setSenderId(callDetailsJSON.getString("from"));
             call.setRecipientId(callDetailsJSON.getString("to"));
             call.setInitiatedAt(callDetailsJSON.getLong("initiatedAt"));
-            call.setEndedAt(callDetailsJSON.getLong("endedAt"));
 
         } catch (JSONException exception) {
             // TODO: proper error handling
+            Log.e(TAG, "Could not create Call from intent. Exception: " + exception.getMessage() + "\nUnparsed JSON: " + callDetails);
+            return null;
         }
 
         return call;
@@ -219,7 +222,14 @@ public class Call extends Observable implements Session.SessionListener {
 
             if (mIsAccepted) {
                 setPublisher(new Publisher(mContext));
-                mOpenTokSession.publish(getPublisher()); // this is a noop if the session is not connected
+
+                if (mOpenTokSession.getConnection() != null) {
+                    // if this was executed when the session was not connected, it would begin
+                    // destroying the publisher
+                    mOpenTokSession.publish(getPublisher());
+                } else {
+                    Log.d(TAG, "Publishing queued because session is not yet connected");
+                }
 
                 Subscriber subscriber = getSubscriber();
                 if (subscriber != null) {
@@ -368,6 +378,24 @@ public class Call extends Observable implements Session.SessionListener {
         }
     };
 
+    public void onPause() {
+        if (mOpenTokSession != null) {
+            mOpenTokSession.onPause();
+        }
+    }
+
+    public void onResume() {
+        if (mOpenTokSession != null) {
+            mOpenTokSession.onResume();
+        }
+    }
+
+    /*
+     * ------------------------------------------------------------------------
+     * Session Listener
+     * ------------------------------------------------------------------------
+     */
+
     public void onConnected(Session session) {
         if (isEnding()) {
             return;
@@ -380,6 +408,8 @@ public class Call extends Observable implements Session.SessionListener {
             }
 
             if (isOutgoing() || isAccepted()) {
+                // if the publishing was queued before because the session was not
+                // already connected, that publishing will occur here.
                 mOpenTokSession.publish(publisher);
             }
         }
