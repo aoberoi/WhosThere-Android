@@ -13,7 +13,7 @@ Key features:
 
 **TODO**: screenshots
 
-## Set up
+## Setup
 
 This application requires several services working together to function:
 *  Client application (such as this repository)
